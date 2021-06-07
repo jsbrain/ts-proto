@@ -1,6 +1,6 @@
 {
   "name": "jsbrain-ts-proto",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "",
   "main": "build/plugin.js",
   "repository": "github:jsbrain/ts-proto",
