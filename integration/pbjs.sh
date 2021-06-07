@@ -25,6 +25,14 @@ yarn pbts --no-comments -o integration/vector-tile/pbjs.d.ts integration/vector-
 yarn pbjs --force-message --force-number -t static-module -o integration/nestjs-metadata/pbjs.js integration/nestjs-metadata/hero.proto
 yarn pbts --no-comments -o integration/nestjs-metadata/pbjs.d.ts integration/nestjs-metadata/pbjs.js
 
+# nestjs-metadata-grpc-js/
+yarn pbjs --force-message --force-number -t static-module -o integration/nestjs-metadata-grpc-js/pbjs.js integration/nestjs-metadata-grpc-js/hero.proto
+yarn pbts --no-comments -o integration/nestjs-metadata-grpc-js/pbjs.d.ts integration/nestjs-metadata-grpc-js/pbjs.js
+
+# nestjs-metadata-grpc-js-union/
+yarn pbjs --force-message --force-number -t static-module -o integration/nestjs-metadata-grpc-js-union/pbjs.js integration/nestjs-metadata-grpc-js-union/hero.proto
+yarn pbts --no-comments -o integration/nestjs-metadata-grpc-js-union/pbjs.d.ts integration/nestjs-metadata-grpc-js-union/pbjs.js
+
 # nestjs-metadata-observables/
 yarn pbjs --force-message --force-number -t static-module -o integration/nestjs-metadata-observables/pbjs.js integration/nestjs-metadata-observables/hero.proto
 yarn pbts --no-comments -o integration/nestjs-metadata-observables/pbjs.d.ts integration/nestjs-metadata-observables/pbjs.js

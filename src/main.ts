@@ -60,6 +60,7 @@ import { Context } from './context';
 import { generateSchema } from './schema';
 import { ConditionalOutput } from 'ts-poet/build/ConditionalOutput';
 import { generateGrpcJsService } from './generate-grpc-js';
+import { isDeepStrictEqual } from 'util';
 
 export function generateFile(ctx: Context, fileDesc: FileDescriptorProto): [string, Code] {
   const { options, utils } = ctx;
@@ -497,38 +498,161 @@ function generateInterfaceDeclaration(
   const { options } = ctx;
   const chunks: Code[] = [];
 
-  maybeAddComment(sourceInfo, chunks, messageDesc.options?.deprecated);
-  // interface name should be defined to avoid import collisions
-  chunks.push(code`export interface ${def(fullName)} {`);
+  if (options.nestJs) {
+    // TODO: Move to 'final' type generation?
+    maybeAddComment(sourceInfo, chunks, messageDesc.options?.deprecated);
 
-  if (ctx.options.outputTypeRegistry) {
-    chunks.push(code`$type: '${fullTypeName}',`);
-  }
-
-  // When oneof=unions, we generate a single property with an ADT per `oneof` clause.
-  const processedOneofs = new Set<number>();
-
-  messageDesc.field.forEach((fieldDesc, index) => {
-    if (isWithinOneOfThatShouldBeUnion(options, fieldDesc)) {
-      const { oneofIndex } = fieldDesc;
-      if (!processedOneofs.has(oneofIndex)) {
-        processedOneofs.add(oneofIndex);
-        chunks.push(generateOneofProperty(ctx, messageDesc, oneofIndex, sourceInfo));
+    let hasOneOf = false;
+    let oneofDecl: DescriptorProto['oneofDecl'] = [];
+    messageDesc.field.forEach((fieldDesc) => {
+      if (isWithinOneOfThatShouldBeUnion(options, fieldDesc)) {
+        hasOneOf = true;
+        oneofDecl = messageDesc.oneofDecl;
       }
-      return;
+    });
+
+    if (hasOneOf) {
+      // * We will solve the oneof problem by generating overlapping types for each oneof declaration
+      const generatedTypeNames = [];
+
+      /* ----------------------- Base type definition START ----------------------- */
+      const baseTypeName = `${fullName}_oneof_base`;
+      chunks.push(code`export type ${def(baseTypeName)} = {`);
+      generatedTypeNames.push(baseTypeName);
+
+      if (ctx.options.outputTypeRegistry) {
+        chunks.push(code`$type: '${fullTypeName}',`);
+      }
+
+      messageDesc.field.forEach((fieldDesc, index) => {
+        if (isWithinOneOfThatShouldBeUnion(options, fieldDesc)) {
+          // Ignore oneof types
+          return;
+        }
+
+        // Generate 'normal' types like in base type
+        const info = sourceInfo.lookup(Fields.message.field, index);
+        maybeAddComment(info, chunks, fieldDesc.options?.deprecated);
+
+        const name = maybeSnakeToCamel(fieldDesc.name, options);
+        const type = toTypeName(ctx, messageDesc, fieldDesc);
+        const q = isOptionalProperty(fieldDesc, options) ? '?' : '';
+        chunks.push(code`${name}${q}: ${type}, `);
+      });
+      chunks.push(code`}`);
+      /* ------------------------ Base type definition END ------------------------ */
+
+      /* ----------------------- Extra type generation START ---------------------- */
+      // When oneof=unions, we generate a single property with an ADT per `oneof` clause.
+      const processedOneofs = new Set<number>();
+      messageDesc.field.forEach((fieldDesc, index) => {
+        if (isWithinOneOfThatShouldBeUnion(options, fieldDesc)) {
+          const { oneofIndex } = fieldDesc;
+          if (!processedOneofs.has(oneofIndex)) {
+            processedOneofs.add(oneofIndex);
+            const oneofField = oneofDecl[oneofIndex];
+            const oneofTypeName = `${fullName}_oneof_${oneofField.name}`;
+            generatedTypeNames.push(oneofTypeName);
+            chunks.push(code`export type ${def(oneofTypeName)} =`);
+            chunks.push(nestJsGenerateOneofProperty(ctx, messageDesc, oneofIndex, sourceInfo));
+            // chunks.push(code`\n`);
+          }
+          return;
+        }
+      });
+      /* ------------------------ Extra type generation END ----------------------- */
+
+      /* ------------------------ Generate final type START ----------------------- */
+      // * Generate the final type name by joining the previously generated types
+      chunks.push(code`export type ${def(fullName)} =`);
+      chunks.push(
+        joinCode(
+          generatedTypeNames.map((tn) => {
+            return code`${tn}`;
+          }),
+          { on: '&' }
+        )
+      );
+      /* ------------------------- Generate final type END ------------------------ */
+
+      return joinCode(chunks, { on: '\n' });
+    } else {
+      // interface name should be defined to avoid import collisions
+      chunks.push(code`export interface ${def(fullName)} {`);
+
+      if (ctx.options.outputTypeRegistry) {
+        chunks.push(code`$type: '${fullTypeName}',`);
+      }
+
+      messageDesc.field.forEach((fieldDesc, index) => {
+        const info = sourceInfo.lookup(Fields.message.field, index);
+        maybeAddComment(info, chunks, fieldDesc.options?.deprecated);
+
+        const name = maybeSnakeToCamel(fieldDesc.name, options);
+        const type = toTypeName(ctx, messageDesc, fieldDesc);
+        const q = isOptionalProperty(fieldDesc, options) ? '?' : '';
+        chunks.push(code`${name}${q}: ${type}, `);
+      });
+
+      chunks.push(code`}`);
+      return joinCode(chunks, { on: '\n' });
+    }
+  } else {
+    maybeAddComment(sourceInfo, chunks, messageDesc.options?.deprecated);
+    // interface name should be defined to avoid import collisions
+    chunks.push(code`export interface ${def(fullName)} {`);
+
+    if (ctx.options.outputTypeRegistry) {
+      chunks.push(code`$type: '${fullTypeName}',`);
     }
 
-    const info = sourceInfo.lookup(Fields.message.field, index);
-    maybeAddComment(info, chunks, fieldDesc.options?.deprecated);
+    // When oneof=unions, we generate a single property with an ADT per `oneof` clause.
+    const processedOneofs = new Set<number>();
 
-    const name = maybeSnakeToCamel(fieldDesc.name, options);
-    const type = toTypeName(ctx, messageDesc, fieldDesc);
-    const q = isOptionalProperty(fieldDesc, options) ? '?' : '';
-    chunks.push(code`${name}${q}: ${type}, `);
-  });
+    messageDesc.field.forEach((fieldDesc, index) => {
+      if (isWithinOneOfThatShouldBeUnion(options, fieldDesc)) {
+        const { oneofIndex } = fieldDesc;
+        if (!processedOneofs.has(oneofIndex)) {
+          processedOneofs.add(oneofIndex);
+          chunks.push(generateOneofProperty(ctx, messageDesc, oneofIndex, sourceInfo));
+        }
+        return;
+      }
 
-  chunks.push(code`}`);
-  return joinCode(chunks, { on: '\n' });
+      const info = sourceInfo.lookup(Fields.message.field, index);
+      maybeAddComment(info, chunks, fieldDesc.options?.deprecated);
+
+      const name = maybeSnakeToCamel(fieldDesc.name, options);
+      const type = toTypeName(ctx, messageDesc, fieldDesc);
+      const q = isOptionalProperty(fieldDesc, options) ? '?' : '';
+      chunks.push(code`${name}${q}: ${type}, `);
+    });
+
+    chunks.push(code`}`);
+    return joinCode(chunks, { on: '\n' });
+  }
+}
+
+function nestJsGenerateOneofProperty(
+  ctx: Context,
+  messageDesc: DescriptorProto,
+  oneofIndex: number,
+  sourceInfo: SourceInfo
+): Code {
+  const { options } = ctx;
+  const fields = messageDesc.field.filter((field) => isWithinOneOf(field) && field.oneofIndex === oneofIndex);
+  const unionType = joinCode(
+    fields.map((f) => {
+      const remainingFields = fields.filter((rem) => !isDeepStrictEqual(rem, f));
+      let fieldName = maybeSnakeToCamel(f.name, options);
+      let typeName = toTypeName(ctx, messageDesc, f);
+      const neverFields = remainingFields.map((rem) => `${maybeSnakeToCamel(rem.name, options)}?: never`).join(', ');
+      return code`{ ${fieldName}: ${typeName}, ${neverFields} }`;
+    }),
+    { on: ' | ' }
+  );
+
+  return code`${unionType}`;
 }
 
 function generateOneofProperty(

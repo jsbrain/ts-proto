@@ -1,0 +1,3 @@
+nestJs=true,addGrpcMetadata=true,outputServices=grpc-js,oneof=unions
+
+
